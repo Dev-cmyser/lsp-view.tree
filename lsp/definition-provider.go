@@ -92,74 +92,67 @@ func (dp *DefinitionProvider) getNodeType(content string, position Position, wor
 func (dp *DefinitionProvider) findRootClassDefinition(documentURI, nodeName string) ([]Location, error) {
 	// Find corresponding .ts file
 	filePath := dp.uriToFilePath(documentURI)
-	tsPath := strings.Replace(filePath, ".view.tree", ".ts", 1)
+	tsPath := strings.Replace(filePath, ".tree", ".ts", 1)
 	tsURI := dp.filePathToURI(tsPath)
 	
-	// Check if .ts file exists
-	if _, err := os.Stat(tsPath); err == nil {
-		// Try to find class symbol in .ts file
-		location, err := dp.findClassSymbolInFile(tsURI, "$"+nodeName)
-		if err == nil && location != nil {
-			return []Location{*location}, nil
-		}
-		
-		// If no specific class found, return beginning of file
-		locationRange := Range{
-			Start: Position{Line: 0, Character: 0},
-			End:   Position{Line: 0, Character: 0},
-		}
-		return []Location{{URI: tsURI, Range: locationRange}}, nil
+	// Try to find class symbol in .ts file
+	location, err := dp.findClassSymbolInFile(tsURI, "$"+nodeName)
+	if err == nil && location != nil {
+		return []Location{*location}, nil
 	}
 	
-	// If .ts file doesn't exist, return empty
-	return []Location{}, nil
+	// If no specific class found, return beginning of file (always return location like in reference)
+	locationRange := Range{
+		Start: Position{Line: 0, Character: 0},
+		End:   Position{Line: 0, Character: 0},
+	}
+	return []Location{{URI: tsURI, Range: locationRange}}, nil
 }
 
 func (dp *DefinitionProvider) findClassDefinition(nodeName string) ([]Location, error) {
 	parts := strings.Split(nodeName, "_")
 	workspaceRoot := dp.projectScanner.workspaceRoot
 	
-	// Try to find .view.tree file
 	if len(parts) == 0 {
 		return []Location{}, nil
 	}
 	
 	lastPart := parts[len(parts)-1]
-	
-	possiblePaths := []string{
-		filepath.Join(append([]string{workspaceRoot}, append(parts, lastPart+".view.tree")...)...),
-		filepath.Join(append([]string{workspaceRoot}, append(parts, lastPart, lastPart+".view.tree")...)...),
+	firstCharRange := Range{
+		Start: Position{Line: 0, Character: 0},
+		End:   Position{Line: 0, Character: 0},
 	}
 	
-	for _, viewTreePath := range possiblePaths {
-		if _, err := os.Stat(viewTreePath); err == nil {
-			uri := dp.filePathToURI(viewTreePath)
-			firstCharRange := Range{
-				Start: Position{Line: 0, Character: 0},
-				End:   Position{Line: 0, Character: 0},
-			}
-			return []Location{{URI: uri, Range: firstCharRange}}, nil
-		}
-	}
-	
-	// Try to find in project data
-	componentFile := dp.projectScanner.GetComponentFile(nodeName)
-	if componentFile != "" {
-		uri := dp.filePathToURI(componentFile)
-		firstCharRange := Range{
-			Start: Position{Line: 0, Character: 0},
-			End:   Position{Line: 0, Character: 0},
-		}
+	// First path: workspaceRoot/parts.join("/"), lastPart + ".view.tree"
+	viewTreePath1 := filepath.Join(append([]string{workspaceRoot}, append(parts, lastPart+".view.tree")...)...)
+	if _, err := os.Stat(viewTreePath1); err == nil {
+		uri := dp.filePathToURI(viewTreePath1)
 		return []Location{{URI: uri, Range: firstCharRange}}, nil
 	}
 	
-	return []Location{}, nil
+	// Second path: workspaceRoot/[...parts, lastPart].join("/"), lastPart + ".view.tree"
+	viewTreePath2 := filepath.Join(append([]string{workspaceRoot}, append(append(parts, lastPart), lastPart+".view.tree")...)...)
+	if _, err := os.Stat(viewTreePath2); err == nil {
+		uri := dp.filePathToURI(viewTreePath2)
+		return []Location{{URI: uri, Range: firstCharRange}}, nil
+	}
+	
+	// Try to find in project data (equivalent to workspace symbols)
+	componentFile := dp.projectScanner.GetComponentFile(nodeName)
+	if componentFile != "" {
+		uri := dp.filePathToURI(componentFile)
+		return []Location{{URI: uri, Range: firstCharRange}}, nil
+	}
+	
+	// Always return first path location (even if file doesn't exist) like in reference
+	uri := dp.filePathToURI(viewTreePath1)
+	return []Location{{URI: uri, Range: firstCharRange}}, nil
 }
 
 func (dp *DefinitionProvider) findCompDefinition(documentURI, nodeName string) ([]Location, error) {
 	// Find corresponding .css.ts file
 	filePath := dp.uriToFilePath(documentURI)
-	cssPath := strings.Replace(filePath, ".view.tree", ".css.ts", 1)
+	cssPath := strings.Replace(filePath, ".tree", ".css.ts", 1)
 	cssURI := dp.filePathToURI(cssPath)
 	
 	if _, err := os.Stat(cssPath); err == nil {
@@ -184,34 +177,31 @@ func (dp *DefinitionProvider) findCompDefinition(documentURI, nodeName string) (
 }
 
 func (dp *DefinitionProvider) findPropDefinition(documentURI, nodeName string) ([]Location, error) {
-	// Get the current component name
+	// Get className from position 0,1 (like in reference)
 	content, err := dp.getDocumentContent(documentURI)
 	if err != nil {
 		return []Location{}, err
 	}
 	
-	currentComponent := dp.getCurrentComponentFromContent(content)
-	if currentComponent == "" {
+	// Get word at position 0,1 and add $ prefix
+	className := dp.getClassNameAtPosition01(content)
+	if className == "" {
 		return []Location{}, nil
 	}
 	
 	// Find corresponding .ts file
 	filePath := dp.uriToFilePath(documentURI)
-	tsPath := strings.Replace(filePath, ".view.tree", ".ts", 1)
+	tsPath := strings.Replace(filePath, ".tree", ".ts", 1)
 	tsURI := dp.filePathToURI(tsPath)
 	
-	if _, err := os.Stat(tsPath); err == nil {
-		// Find property in .ts file
-		propLocation, err := dp.findPropertyInFile(tsURI, currentComponent, nodeName)
-		if err == nil && propLocation != nil {
-			return []Location{*propLocation}, nil
-		}
-		
-		// Fallback to comp definition
-		return dp.findCompDefinition(documentURI, nodeName)
+	// Find property in .ts file
+	propLocation, err := dp.findPropertyInFile(tsURI, className, nodeName)
+	if err == nil && propLocation != nil {
+		return []Location{*propLocation}, nil
 	}
 	
-	return []Location{}, nil
+	// Always fallback to comp definition if no propSymbol found (like in reference)
+	return dp.findCompDefinition(documentURI, nodeName)
 }
 
 func (dp *DefinitionProvider) findSubPropDefinition(documentURI string, position Position, nodeName string) ([]Location, error) {
@@ -346,6 +336,42 @@ func (dp *DefinitionProvider) getCurrentComponentFromContent(content string) str
 	}
 	
 	return ""
+}
+
+func (dp *DefinitionProvider) getClassNameAtPosition01(content string) string {
+	// Get word at position 0,1 and add $ prefix (like in reference)
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 {
+		return ""
+	}
+	
+	line := lines[0]
+	if len(line) <= 1 {
+		return ""
+	}
+	
+	// Find word starting at position 1
+	start := 1
+	end := start
+	
+	// Move end forwards to find word end
+	for end < len(line) && dp.isWordCharacter(rune(line[end])) {
+		end++
+	}
+	
+	if start == end {
+		return ""
+	}
+	
+	nodeName := line[start:end]
+	return "$" + nodeName
+}
+
+func (dp *DefinitionProvider) isWordCharacter(char rune) bool {
+	return (char >= 'a' && char <= 'z') ||
+		(char >= 'A' && char <= 'Z') ||
+		(char >= '0' && char <= '9') ||
+		char == '_' || char == '$' || char == '?' || char == '*'
 }
 
 func (dp *DefinitionProvider) getTextInRange(content string, r Range) string {
