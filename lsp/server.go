@@ -753,29 +753,45 @@ func NewServer() *Server {
 func (s *Server) Run() error {
 	log.Println("[view.tree] Server starting...")
 	
-	scanner := bufio.NewScanner(s.reader)
+	reader := bufio.NewReader(s.reader)
 	
-	for scanner.Scan() {
-		line := scanner.Text()
-		
-		// Parse Content-Length header
-		if !strings.HasPrefix(line, "Content-Length: ") {
-			continue
+	for {
+		// Read headers until empty line
+		var contentLength int
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				if err == io.EOF {
+					return nil
+				}
+				return err
+			}
+			
+			line = strings.TrimSpace(line)
+			if line == "" {
+				// Empty line marks end of headers
+				break
+			}
+			
+			if strings.HasPrefix(line, "Content-Length: ") {
+				lengthStr := strings.TrimPrefix(line, "Content-Length: ")
+				length, err := strconv.Atoi(strings.TrimSpace(lengthStr))
+				if err != nil {
+					log.Printf("[view.tree] Invalid Content-Length: %v", err)
+					continue
+				}
+				contentLength = length
+			}
 		}
 		
-		lengthStr := strings.TrimPrefix(line, "Content-Length: ")
-		length, err := strconv.Atoi(strings.TrimSpace(lengthStr))
-		if err != nil {
-			log.Printf("[view.tree] Invalid Content-Length: %v", err)
+		if contentLength == 0 {
+			log.Printf("[view.tree] No Content-Length header found")
 			continue
 		}
-		
-		// Read separator line
-		scanner.Scan()
 		
 		// Read message content
-		content := make([]byte, length)
-		_, err = io.ReadFull(s.reader, content)
+		content := make([]byte, contentLength)
+		_, err := io.ReadFull(reader, content)
 		if err != nil {
 			log.Printf("[view.tree] Error reading message content: %v", err)
 			continue
@@ -785,8 +801,6 @@ func (s *Server) Run() error {
 			log.Printf("[view.tree] Error handling message: %v", err)
 		}
 	}
-	
-	return scanner.Err()
 }
 
 func (s *Server) handleMessage(content []byte) error {
@@ -907,23 +921,42 @@ func (s *Server) handleInitialize(msg LSPMessage) error {
 func (s *Server) handleInitialized(msg LSPMessage) error {
 	log.Println("[view.tree] Client initialized")
 	
-	// Initialize providers
-	if err := s.initializeProviders(); err != nil {
-		log.Printf("[view.tree] Failed to initialize providers: %v", err)
-	}
+	// Initialize providers with error recovery
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[view.tree] Panic in provider initialization: %v", r)
+			}
+		}()
+		
+		if err := s.initializeProviders(); err != nil {
+			log.Printf("[view.tree] Failed to initialize providers: %v", err)
+		}
+	}()
 	
 	return nil
 }
 
 func (s *Server) initializeProviders() error {
+	// Add panic recovery to prevent server crashes
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[view.tree] Panic during initialization: %v", r)
+		}
+	}()
+	
 	// For now, we'll use current working directory as workspace root
 	// In a real implementation, we'd get this from workspace folders
 	workspaceRoot := "."
 	
 	log.Printf("[view.tree] Initializing with workspace: %s", workspaceRoot)
 	
-	// Initialize project scanner
+	// Initialize project scanner with error handling
 	s.projectScanner = NewProjectScanner(workspaceRoot)
+	if s.projectScanner == nil {
+		log.Printf("[view.tree] Warning: Failed to create project scanner")
+		return nil // Don't fail completely, just continue without scanning
+	}
 	
 	// Initialize providers
 	s.definitionProvider = NewDefinitionProvider(s.projectScanner)
@@ -931,9 +964,13 @@ func (s *Server) initializeProviders() error {
 	s.hoverProvider = NewHoverProvider(s.projectScanner)
 	s.diagnosticProvider = NewDiagnosticProvider(s.projectScanner)
 	
-	// Start initial project scan
+	// Start initial project scan with better error handling
+	log.Println("[view.tree] Starting project scan...")
 	if err := s.projectScanner.ScanProject(); err != nil {
-		log.Printf("[view.tree] Failed to scan project: %v", err)
+		log.Printf("[view.tree] Project scan failed (continuing anyway): %v", err)
+		// Don't return error - LSP should work even without successful project scan
+	} else {
+		log.Println("[view.tree] Project scan completed successfully")
 	}
 	
 	log.Println("[view.tree] LSP server initialized successfully")
