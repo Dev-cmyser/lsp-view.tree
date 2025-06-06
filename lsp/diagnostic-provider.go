@@ -372,9 +372,7 @@ func (dp *DiagnosticProvider) validateBindings(content string) []Diagnostic {
 			pattern string
 			message string
 		}{
-			{`[^<]=[^>]`, "Use <= or <=> for bindings, not ="},
-			{`<[^=]`, "Incomplete binding operator. Use <= or <=>"},
-			{`>[^=]`, "Invalid operator. Use <= or <=>"},
+			{`^\s*\w+\s*=\s*[^>]`, "Use <= or <=> for bindings, not ="},
 			{`<=\s*$`, "Binding operator <= must be followed by a property name"},
 			{`<=>\s*$`, "Binding operator <=> must be followed by a property name"},
 		}
@@ -400,11 +398,27 @@ func (dp *DiagnosticProvider) validateBindings(content string) []Diagnostic {
 			}
 		}
 
-		// Check for conflicting bindings - count actual distinct operators
-		hasOneWayBinding := regexp.MustCompile(`[^<]<=\s`).MatchString(trimmed)
+		// Check for conflicting bindings - properly distinguish <= from <=> operators
 		hasTwoWayBinding := strings.Contains(trimmed, "<=>")
+		hasOneWayBinding := false
+		if !hasTwoWayBinding {
+			// Only check for standalone <= if there's no <=> present
+			hasOneWayBinding = regexp.MustCompile(`\s<=\s`).MatchString(trimmed)
+		}
 		
-		if hasOneWayBinding && hasTwoWayBinding {
+		// Check for multiple different binding operators on same line
+		bindingCount := 0
+		if hasTwoWayBinding {
+			bindingCount++
+		}
+		if hasOneWayBinding {
+			bindingCount++
+		}
+		if regexp.MustCompile(`\s=>\s`).MatchString(trimmed) {
+			bindingCount++
+		}
+		
+		if bindingCount > 1 {
 			r := Range{
 				Start: Position{Line: lineIndex, Character: 0},
 				End:   Position{Line: lineIndex, Character: len(line)},

@@ -250,6 +250,53 @@ $second_component
 	}
 }
 
+func TestNestedComponentParsing(t *testing.T) {
+	parser := NewViewTreeParser()
+	
+	content := `$my_app $mol_view
+	sub /
+		<= Button $mol_button_major
+			title @ \Subscribe
+			click? <=> submit? null
+		<= Message $mol_status
+			title @ \Status Message
+	other_prop value`
+	
+	parseResult := parser.Parse(content)
+	
+	// Should have one root component
+	if len(parseResult.Components) != 1 {
+		t.Errorf("Expected 1 component, got %d", len(parseResult.Components))
+	}
+	
+	rootComponent := parseResult.Components[0]
+	if rootComponent.Name != "$my_app" {
+		t.Errorf("Expected root component '$my_app', got '%s'", rootComponent.Name)
+	}
+	
+	// Test that getCurrentComponent finds correct component for nested positions
+	// Position at "title @ \Subscribe" should find $mol_button_major
+	pos := Position{Line: 3, Character: 8}
+	component := parser.GetCurrentComponent(content, pos)
+	if component != "$mol_button_major" {
+		t.Errorf("Expected '$mol_button_major' for nested position, got '%s'", component)
+	}
+	
+	// Position at "title @ \Status Message" should find $mol_status
+	pos = Position{Line: 6, Character: 8}
+	component = parser.GetCurrentComponent(content, pos)
+	if component != "$mol_status" {
+		t.Errorf("Expected '$mol_status' for nested position, got '%s'", component)
+	}
+	
+	// Position at "other_prop value" should find $my_app
+	pos = Position{Line: 7, Character: 5}
+	component = parser.GetCurrentComponent(content, pos)
+	if component != "$my_app" {
+		t.Errorf("Expected '$my_app' for root level property, got '%s'", component)
+	}
+}
+
 func TestCompletionProvider(t *testing.T) {
 	scanner := NewProjectScanner(".")
 	provider := NewCompletionProvider(scanner)

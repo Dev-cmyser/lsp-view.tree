@@ -60,7 +60,9 @@ func (vtp *ViewTreeParser) Parse(content string) ParseResult {
 		Errors:     []ParseError{},
 	}
 
-	var currentComponent *ParsedComponent
+	// Stack to track components by indentation level
+	componentStack := make(map[int]*ParsedComponent)
+	var rootComponent *ParsedComponent
 
 	for lineIndex, line := range vtp.lines {
 		if line == "" {
@@ -77,13 +79,16 @@ func (vtp *ViewTreeParser) Parse(content string) ParseResult {
 
 		// Root level component definition
 		if indentLevel == 0 && strings.HasPrefix(trimmed, "$") {
-			// Finish previous component
-			if currentComponent != nil {
-				currentComponent.EndLine = lineIndex - 1
-				result.Components = append(result.Components, *currentComponent)
+			// Finish previous root component
+			if rootComponent != nil {
+				rootComponent.EndLine = lineIndex - 1
+				result.Components = append(result.Components, *rootComponent)
 			}
 
-			// Start new component
+			// Clear component stack for new root component
+			componentStack = make(map[int]*ParsedComponent)
+
+			// Start new root component
 			fields := strings.Fields(trimmed)
 			if len(fields) == 0 {
 				continue
@@ -91,13 +96,14 @@ func (vtp *ViewTreeParser) Parse(content string) ParseResult {
 			firstWord := fields[0]
 			wordRange := vtp.getWordRange(lineIndex, strings.Index(line, firstWord), firstWord)
 
-			currentComponent = &ParsedComponent{
+			rootComponent = &ParsedComponent{
 				Name:       firstWord,
 				Range:      wordRange,
 				Properties: []ParsedProperty{},
 				StartLine:  lineIndex,
 				EndLine:    lineIndex,
 			}
+			componentStack[0] = rootComponent
 
 			// Add node for root class
 			nodeType := "class"
@@ -111,96 +117,122 @@ func (vtp *ViewTreeParser) Parse(content string) ParseResult {
 				Line:        lineIndex,
 				IndentLevel: 0,
 			})
-		} else if indentLevel > 0 && currentComponent != nil {
-			// Property or sub-component
-			wordMatch := regexp.MustCompile(`^(\s+)([a-zA-Z_$][a-zA-Z0-9_?*]*)`).FindStringSubmatch(line)
-			if len(wordMatch) > 2 {
-				propertyName := wordMatch[2]
-				if propertyName == "" {
-					continue
+		} else if indentLevel > 0 {
+			// Check if this line contains a component reference
+			componentRef := vtp.extractComponentReference(line)
+			if componentRef != "" {
+				// Create new component entry for this indentation level
+				wordRange := vtp.getWordRange(lineIndex, strings.Index(line, componentRef), componentRef)
+				newComponent := &ParsedComponent{
+					Name:       componentRef,
+					Range:      wordRange,
+					Properties: []ParsedProperty{},
+					StartLine:  lineIndex,
+					EndLine:    lineIndex,
 				}
-				propertyStart := strings.Index(line, propertyName)
-				wordRange := vtp.getWordRange(lineIndex, propertyStart, propertyName)
+				componentStack[indentLevel] = newComponent
+			}
 
-				// Determine if it's a binding
-				isBinding := strings.Contains(trimmed, "<=") || strings.Contains(trimmed, "<=>")
-				var bindingType string
-				var value string
+			// Find the current component for this indentation level
+			var currentComponent *ParsedComponent
+			for level := indentLevel; level >= 0; level-- {
+				if comp, exists := componentStack[level]; exists {
+					currentComponent = comp
+					break
+				}
+			}
 
-				if isBinding {
-					if strings.Contains(trimmed, "<=>") {
-						bindingType = "two-way"
-					} else if strings.Contains(trimmed, "<=") {
-						bindingType = "one-way"
+			if currentComponent != nil {
+				// Property or sub-component
+				wordMatch := regexp.MustCompile(`^(\s+)([a-zA-Z_$][a-zA-Z0-9_?*]*)`).FindStringSubmatch(line)
+				if len(wordMatch) > 2 {
+					propertyName := wordMatch[2]
+					if propertyName == "" {
+						continue
 					}
+					propertyStart := strings.Index(line, propertyName)
+					wordRange := vtp.getWordRange(lineIndex, propertyStart, propertyName)
 
-					// Extract bound property name
-					bindingMatch := regexp.MustCompile(`<=>\s*([a-zA-Z_][a-zA-Z0-9_?*]*)|<=\s*([a-zA-Z_][a-zA-Z0-9_?*]*)`).FindStringSubmatch(trimmed)
-					if len(bindingMatch) > 1 {
-						if bindingMatch[1] != "" {
-							value = bindingMatch[1]
-						} else if len(bindingMatch) > 2 {
-							value = bindingMatch[2]
+					// Determine if it's a binding
+					isBinding := strings.Contains(trimmed, "<=") || strings.Contains(trimmed, "<=>")
+					var bindingType string
+					var value string
+
+					if isBinding {
+						if strings.Contains(trimmed, "<=>") {
+							bindingType = "two-way"
+						} else if strings.Contains(trimmed, "<=") {
+							bindingType = "one-way"
+						}
+
+						// Extract bound property name
+						bindingMatch := regexp.MustCompile(`<=>\s*([a-zA-Z_][a-zA-Z0-9_?*]*)|<=\s*([a-zA-Z_][a-zA-Z0-9_?*]*)`).FindStringSubmatch(trimmed)
+						if len(bindingMatch) > 1 {
+							if bindingMatch[1] != "" {
+								value = bindingMatch[1]
+							} else if len(bindingMatch) > 2 {
+								value = bindingMatch[2]
+							}
+						}
+					} else if strings.Contains(trimmed, "^") {
+						bindingType = "override"
+					} else {
+						// Extract value after property name
+						valueMatch := regexp.MustCompile(`^[a-zA-Z_$][a-zA-Z0-9_?*]*\s+(.+)$`).FindStringSubmatch(trimmed)
+						if len(valueMatch) > 1 {
+							value = strings.TrimSpace(valueMatch[1])
 						}
 					}
-				} else if strings.Contains(trimmed, "^") {
-					bindingType = "override"
-				} else {
-					// Extract value after property name
-					valueMatch := regexp.MustCompile(`^[a-zA-Z_$][a-zA-Z0-9_?*]*\s+(.+)$`).FindStringSubmatch(trimmed)
-					if len(valueMatch) > 1 {
-						value = strings.TrimSpace(valueMatch[1])
+
+					property := ParsedProperty{
+						Name:        propertyName,
+						Range:       wordRange,
+						Line:        lineIndex,
+						IndentLevel: indentLevel,
+						IsBinding:   isBinding,
+						BindingType: bindingType,
+						Value:       value,
 					}
+
+					currentComponent.Properties = append(currentComponent.Properties, property)
+
+					// Determine node type
+					var nodeType string
+					if strings.HasPrefix(propertyName, "$") {
+						nodeType = "comp"
+					} else if indentLevel == 1 {
+						nodeType = "prop"
+					} else {
+						nodeType = "sub_prop"
+					}
+
+					result.Nodes = append(result.Nodes, ParsedNode{
+						Type:        nodeType,
+						Name:        propertyName,
+						Range:       wordRange,
+						Line:        lineIndex,
+						IndentLevel: indentLevel,
+					})
 				}
-
-				property := ParsedProperty{
-					Name:        propertyName,
-					Range:       wordRange,
-					Line:        lineIndex,
-					IndentLevel: indentLevel,
-					IsBinding:   isBinding,
-					BindingType: bindingType,
-					Value:       value,
+			} else if indentLevel > 0 {
+				// Error: indented line without current component
+				errorRange := Range{
+					Start: Position{Line: lineIndex, Character: 0},
+					End:   Position{Line: lineIndex, Character: len(line)},
 				}
-
-				currentComponent.Properties = append(currentComponent.Properties, property)
-
-				// Determine node type
-				var nodeType string
-				if strings.HasPrefix(propertyName, "$") {
-					nodeType = "comp"
-				} else if indentLevel == 1 {
-					nodeType = "prop"
-				} else {
-					nodeType = "sub_prop"
-				}
-
-				result.Nodes = append(result.Nodes, ParsedNode{
-					Type:        nodeType,
-					Name:        propertyName,
-					Range:       wordRange,
-					Line:        lineIndex,
-					IndentLevel: indentLevel,
+				result.Errors = append(result.Errors, ParseError{
+					Message:  "Property defined outside of component",
+					Range:    errorRange,
+					Severity: "error",
 				})
 			}
-		} else if indentLevel > 0 && currentComponent == nil {
-			// Error: indented line without current component
-			errorRange := Range{
-				Start: Position{Line: lineIndex, Character: 0},
-				End:   Position{Line: lineIndex, Character: len(line)},
-			}
-			result.Errors = append(result.Errors, ParseError{
-				Message:  "Property defined outside of component",
-				Range:    errorRange,
-				Severity: "error",
-			})
 		}
 	}
 
-	// Finish last component
-	if currentComponent != nil {
-		currentComponent.EndLine = len(vtp.lines) - 1
-		result.Components = append(result.Components, *currentComponent)
+	// Finish last root component
+	if rootComponent != nil {
+		rootComponent.EndLine = len(vtp.lines) - 1
+		result.Components = append(result.Components, *rootComponent)
 	}
 
 	return result
@@ -311,6 +343,27 @@ func (vtp *ViewTreeParser) extractComponentFromLine(line string) string {
 		`=>\s+\w+\s+(\$\w+)`,
 		`<=>\s+\w+\s+(\$\w+)`,
 		`^\s*(\$\w+)`, // Direct component reference
+	}
+	
+	for _, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		if matches := re.FindStringSubmatch(trimmed); len(matches) > 1 {
+			return matches[1]
+		}
+	}
+	
+	return ""
+}
+
+func (vtp *ViewTreeParser) extractComponentReference(line string) string {
+	// Extract component reference from binding lines like "<= Button $mol_button_major"
+	trimmed := strings.TrimSpace(line)
+	
+	// Check for component references in bindings
+	patterns := []string{
+		`<=\s+\w+\s+(\$\w+)`,
+		`=>\s+\w+\s+(\$\w+)`,
+		`<=>\s+\w+\s+(\$\w+)`,
 	}
 	
 	for _, pattern := range patterns {
