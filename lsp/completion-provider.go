@@ -62,7 +62,6 @@ func (cp *CompletionProvider) ProvideCompletionItems(document *TextDocument, pos
 	case "value":
 		log.Println("[completion] Adding value completions")
 		cp.addValueCompletions(&items)
-		cp.addComponentCompletions(&items)
 	}
 	
 	log.Printf("[completion] Returning %d items", len(items))
@@ -71,7 +70,11 @@ func (cp *CompletionProvider) ProvideCompletionItems(document *TextDocument, pos
 
 func (cp *CompletionProvider) getCompletionContext(content string, position Position, beforeCursor string) InternalCompletionContext {
 	trimmed := strings.TrimSpace(beforeCursor)
-	indentLevel := len(beforeCursor) - len(strings.TrimLeft(beforeCursor, " \t"))
+	// Match reference logic: beforeCursor.length - beforeCursor.trimStart().length
+	trimStart := strings.TrimLeftFunc(beforeCursor, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == '\n' || r == '\r'
+	})
+	indentLevel := len(beforeCursor) - len(trimStart)
 	
 	// If starts with $ anywhere - it's a component
 	if strings.HasPrefix(trimmed, "$") {
@@ -181,9 +184,6 @@ func (cp *CompletionProvider) addPropertyCompletions(items *[]CompletionItem, cu
 		Documentation: "Creates an empty list",
 	}
 	*items = append(*items, listItem)
-	
-	// Add common properties
-	cp.addCommonProperties(items)
 }
 
 func (cp *CompletionProvider) addCommonProperties(items *[]CompletionItem) {
@@ -280,11 +280,8 @@ func (cp *CompletionProvider) addValueCompletions(items *[]CompletionItem) {
 		*items = append(*items, item)
 	}
 	
-	// Add CSS classes completion
-	cp.addCssClassCompletions(items)
-	
-	// Add event handler completions
-	cp.addEventHandlerCompletions(items)
+	// Add components like in reference
+	cp.addComponentCompletions(items)
 }
 
 func (cp *CompletionProvider) addCssClassCompletions(items *[]CompletionItem) {
