@@ -128,4 +128,5 @@ docs/build/
 
 # Backup files
 *.bak
-*.backup
+*.backup# Keep built files for distribution
+!lib/
