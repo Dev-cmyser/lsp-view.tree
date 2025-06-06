@@ -420,6 +420,72 @@ $another_component $mol_card
 	}
 }
 
+func TestGetNodeType(t *testing.T) {
+	scanner := NewProjectScanner(".")
+	provider := NewDefinitionProvider(scanner)
+	
+	testCases := []struct {
+		name         string
+		content      string
+		line         int
+		character    int
+		expectedType string
+	}{
+		{
+			name:         "Root class at line 0, character 1",
+			content:      "$my_component $mol_view\n\ttitle @ \\Test",
+			line:         0,
+			character:    1,
+			expectedType: "root_class",
+		},
+		{
+			name:         "Component in binding",
+			content:      "$my_component $mol_view\n\t<= Button $mol_button_major\n\t\ttitle @ \\Click",
+			line:         1,
+			character:    11,
+			expectedType: "class",
+		},
+		{
+			name:         "Component starting with $",
+			content:      "$my_component $mol_view\n\tsub /\n\t\t<= Input $mol_string",
+			line:         2,
+			character:    13,
+			expectedType: "class",
+		},
+		{
+			name:         "Property at root level",
+			content:      "$my_component $mol_view\n\ttitle @ \\Test",
+			line:         1,
+			character:    1,
+			expectedType: "prop",
+		},
+		{
+			name:         "Property with binding operator",
+			content:      "$my_component $mol_view\n\t\tvalue <= input_value",
+			line:         1,
+			character:    13,
+			expectedType: "prop",
+		},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			position := Position{Line: tc.line, Character: tc.character}
+			wordRange := provider.parser.GetWordRangeAtPosition(tc.content, position)
+			
+			if wordRange == nil {
+				t.Fatalf("GetWordRangeAtPosition returned nil for position %d:%d", tc.line, tc.character)
+			}
+			
+			nodeType := provider.getNodeType(tc.content, position, *wordRange)
+			if nodeType != tc.expectedType {
+				t.Errorf("Expected node type '%s', got '%s' for content:\n%s\nPosition: %d:%d", 
+					tc.expectedType, nodeType, tc.content, tc.line, tc.character)
+			}
+		})
+	}
+}
+
 func TestLSPMessageParsing(t *testing.T) {
 	// Test valid LSP message
 	msg := LSPMessage{

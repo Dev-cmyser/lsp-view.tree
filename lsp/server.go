@@ -718,16 +718,19 @@ type DidCloseTextDocumentParams struct {
 
 // Server struct and main implementation
 type Server struct {
-	reader   io.Reader
-	writer   io.Writer
-	
-	// Capabilities
-	hasConfigurationCapability bool
+	reader io.Reader
+	writer io.Writer
+
+	// Client capabilities
+	hasConfigurationCapability   bool
 	hasWorkspaceFolderCapability bool
-	
-	// Document storage
-	documents sync.Map // map[string]*TextDocument
-	
+
+	// Workspace info
+	workspaceRoot string
+
+	// Document store
+	documents sync.Map
+
 	// Providers
 	projectScanner     *ProjectScanner
 	definitionProvider *DefinitionProvider
@@ -884,6 +887,19 @@ func (s *Server) handleInitialize(msg LSPMessage) error {
 		return err
 	}
 	
+	// Extract workspace root
+	if params.RootURI != nil && *params.RootURI != "" {
+		s.workspaceRoot = s.uriToFilePath(*params.RootURI)
+	} else if params.RootPath != nil && *params.RootPath != "" {
+		s.workspaceRoot = *params.RootPath
+	} else if len(params.WorkspaceFolders) > 0 {
+		s.workspaceRoot = s.uriToFilePath(params.WorkspaceFolders[0].URI)
+	} else {
+		s.workspaceRoot = "."
+	}
+	
+	log.Printf("[view.tree] Workspace root set to: %s", s.workspaceRoot)
+	
 	// Check client capabilities
 	if params.Capabilities.Workspace != nil {
 		s.hasConfigurationCapability = params.Capabilities.Workspace.Configuration
@@ -945,9 +961,11 @@ func (s *Server) initializeProviders() error {
 		}
 	}()
 	
-	// For now, we'll use current working directory as workspace root
-	// In a real implementation, we'd get this from workspace folders
-	workspaceRoot := "."
+	// Use workspace root from initialization
+	workspaceRoot := s.workspaceRoot
+	if workspaceRoot == "" {
+		workspaceRoot = "."
+	}
 	
 	log.Printf("[view.tree] Initializing with workspace: %s", workspaceRoot)
 	

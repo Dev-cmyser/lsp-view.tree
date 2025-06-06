@@ -52,11 +52,6 @@ func (dp *DefinitionProvider) ProvideDefinition(document *TextDocument, position
 }
 
 func (dp *DefinitionProvider) getNodeType(content string, position Position, wordRange Range) string {
-	// Root class - first line, first character after $
-	if wordRange.Start.Character == 1 && wordRange.Start.Line == 0 {
-		return "root_class"
-	}
-	
 	lines := strings.Split(content, "\n")
 	if position.Line >= len(lines) {
 		return "sub_prop"
@@ -64,12 +59,23 @@ func (dp *DefinitionProvider) getNodeType(content string, position Position, wor
 	
 	line := lines[position.Line]
 	
-	// Check if preceded by $
-	if wordRange.Start.Character > 0 && wordRange.Start.Character-1 < len(line) {
-		firstChar := line[wordRange.Start.Character-1]
-		if firstChar == '$' {
-			return "class"
-		}
+	// Get the actual text of the word
+	nodeText := dp.getTextInRange(content, wordRange)
+	
+	// Root class - first line, first character after $ (check before general component check)
+	if position.Character == 1 && position.Line == 0 {
+		return "root_class"
+	}
+	
+	// Check if this is a component (starts with $)
+	if strings.HasPrefix(nodeText, "$") {
+		return "class"
+	}
+	
+	// Check if preceded by $ (with possible spaces)
+	beforeWord := line[:wordRange.Start.Character]
+	if strings.Contains(beforeWord, "$") && strings.HasSuffix(strings.TrimSpace(beforeWord), "$") {
+		return "class"
 	}
 	
 	// Property at root level (character 1)
