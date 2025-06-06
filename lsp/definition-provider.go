@@ -77,11 +77,10 @@ func (dp *DefinitionProvider) getNodeType(content string, position Position, wor
 		return "prop"
 	}
 	
-	// Check for binding operators before the word
-	if wordRange.Start.Character > 0 {
-		beforeWord := line[:wordRange.Start.Character]
-		matched, _ := regexp.MatchString(`[>=^]\s*$`, beforeWord)
-		if matched {
+	// Check for binding operators before the word (translate -2, -1)
+	if wordRange.Start.Character >= 2 && wordRange.Start.Character-2 < len(line) {
+		leftNodeChar := line[wordRange.Start.Character-2]
+		if leftNodeChar == '>' || leftNodeChar == '=' || leftNodeChar == '^' {
 			return "prop"
 		}
 	}
