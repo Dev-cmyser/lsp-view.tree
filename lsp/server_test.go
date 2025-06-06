@@ -563,3 +563,79 @@ func BenchmarkProjectScan(b *testing.B) {
 		scanner.parseViewTreeFile(content, "/test.view.tree")
 	}
 }
+
+func TestHoverProvider(t *testing.T) {
+	scanner := NewProjectScanner(".")
+	provider := NewHoverProvider(scanner)
+	
+	document := &TextDocument{
+		URI:        "file:///test.view.tree",
+		LanguageID: "tree",
+		Version:    1,
+		Text: `$my_component $mol_view
+	title @ \Test Component
+	sub /
+		<= Button $mol_button_major
+			title @ \Click me
+			click? <=> on_click? null
+		<= Input $mol_string
+			hint @ \Enter text
+			value? <=> input_value? \`,
+	}
+	
+	testCases := []struct {
+		name           string
+		line           int
+		character      int
+		expectedType   string
+		shouldHaveHover bool
+	}{
+		{
+			name:           "Component hover for $mol_button_major",
+			line:           3,
+			character:      13,
+			expectedType:   "Component",
+			shouldHaveHover: true,
+		},
+		{
+			name:           "Property hover for title",
+			line:           1,
+			character:      1,
+			expectedType:   "Property",
+			shouldHaveHover: true,
+		},
+		{
+			name:           "Property hover for click with binding",
+			line:           5,
+			character:      3,
+			expectedType:   "Property", 
+			shouldHaveHover: true,
+		},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			position := Position{Line: tc.line, Character: tc.character}
+			hover, err := provider.ProvideHover(document, position)
+			
+			if err != nil {
+				t.Fatalf("ProvideHover failed: %v", err)
+			}
+			
+			if tc.shouldHaveHover {
+				if hover == nil {
+					t.Error("Expected hover information, got nil")
+					return
+				}
+				
+				if !strings.Contains(hover.Contents.Value, tc.expectedType) {
+					t.Errorf("Expected hover to contain '%s', got: %s", tc.expectedType, hover.Contents.Value)
+				}
+			} else {
+				if hover != nil {
+					t.Error("Expected no hover information, got hover")
+				}
+			}
+		})
+	}
+}

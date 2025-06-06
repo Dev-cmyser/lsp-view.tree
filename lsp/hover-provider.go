@@ -71,11 +71,6 @@ func (hp *HoverProvider) ProvideHover(document *TextDocument, position Position)
 }
 
 func (hp *HoverProvider) getNodeType(content string, position Position, wordRange Range) string {
-	// Root class - first line, first character after $
-	if wordRange.Start.Character == 1 && wordRange.Start.Line == 0 {
-		return "root_class"
-	}
-	
 	lines := strings.Split(content, "\n")
 	if position.Line >= len(lines) {
 		return "sub_prop"
@@ -83,12 +78,23 @@ func (hp *HoverProvider) getNodeType(content string, position Position, wordRang
 	
 	line := lines[position.Line]
 	
-	// Check if preceded by $
-	if wordRange.Start.Character > 0 && wordRange.Start.Character-1 < len(line) {
-		firstChar := line[wordRange.Start.Character-1]
-		if firstChar == '$' {
-			return "class"
-		}
+	// Get the actual text of the word
+	nodeText := hp.getTextInRange(content, wordRange)
+	
+	// Root class - first line, first character after $ (check before general component check)
+	if position.Character == 1 && position.Line == 0 {
+		return "root_class"
+	}
+	
+	// Check if this is a component (starts with $)
+	if strings.HasPrefix(nodeText, "$") {
+		return "class"
+	}
+	
+	// Check if preceded by $ (with possible spaces)
+	beforeWord := line[:wordRange.Start.Character]
+	if strings.Contains(beforeWord, "$") && strings.HasSuffix(strings.TrimSpace(beforeWord), "$") {
+		return "class"
 	}
 	
 	// Property at root level (character 1)
@@ -96,11 +102,10 @@ func (hp *HoverProvider) getNodeType(content string, position Position, wordRang
 		return "prop"
 	}
 	
-	// Check for binding operators before the word
-	if wordRange.Start.Character > 0 {
-		beforeWord := line[:wordRange.Start.Character]
-		matched, _ := regexp.MatchString(`[>=^]\s*$`, beforeWord)
-		if matched {
+	// Check for binding operators before the word (translate -2, -1)
+	if wordRange.Start.Character >= 2 && wordRange.Start.Character-2 < len(line) {
+		leftNodeChar := line[wordRange.Start.Character-2]
+		if leftNodeChar == '>' || leftNodeChar == '=' || leftNodeChar == '^' {
 			return "prop"
 		}
 	}
@@ -116,15 +121,38 @@ func (hp *HoverProvider) getComponentHover(componentName, documentURI string) (*
 	hasComponent := projectData.Components[componentName]
 	projectData.mutex.RUnlock()
 	
-	if !hasComponent {
-		return nil, nil
-	}
-	
 	var markdownContent []string
 	
 	// Component header
 	markdownContent = append(markdownContent, fmt.Sprintf("**Component**: `%s`", componentName))
 	markdownContent = append(markdownContent, "")
+	
+	// Show inheritance if available (parse from component name pattern)
+	if strings.HasPrefix(componentName, "$mol_") {
+		markdownContent = append(markdownContent, "**Framework**: MOL Framework")
+		markdownContent = append(markdownContent, "")
+	}
+	
+	if !hasComponent {
+		markdownContent = append(markdownContent, "*External component - not found in current project*")
+		markdownContent = append(markdownContent, "")
+		
+		// Try to infer file path from component name
+		if strings.HasPrefix(componentName, "$") {
+			parts := strings.Split(componentName[1:], "_")
+			if len(parts) > 0 {
+				lastPart := parts[len(parts)-1]
+				expectedPath := strings.Join(parts, "/") + "/" + lastPart + ".view.tree"
+				markdownContent = append(markdownContent, fmt.Sprintf("**Expected path**: `%s`", expectedPath))
+				markdownContent = append(markdownContent, "")
+			}
+		}
+		
+		return &MarkupContent{
+			Kind:  MarkupKindMarkdown,
+			Value: strings.Join(markdownContent, "\n"),
+		}, nil
+	}
 	
 	// Component file location
 	componentFile := hp.projectScanner.GetComponentFile(componentName)
@@ -225,23 +253,36 @@ func (hp *HoverProvider) getPropertyHover(propertyName, content string) *MarkupC
 		markdownContent = append(markdownContent, "")
 	}
 	
-	// Property type information
-	propertyInfo := hp.getPropertyTypeInfo(propertyName)
-	if propertyInfo != nil {
-		markdownContent = append(markdownContent, fmt.Sprintf("**Type**: %s", propertyInfo.Type))
-		markdownContent = append(markdownContent, "")
-		markdownContent = append(markdownContent, fmt.Sprintf("**Description**: %s", propertyInfo.Description))
+	// Find property context in the current file
+	propertyContext := hp.findPropertyContext(propertyName, content)
+	if propertyContext != nil {
+		if propertyContext.BindingType != "" {
+			markdownContent = append(markdownContent, fmt.Sprintf("**Binding**: `%s`", propertyContext.BindingType))
+			markdownContent = append(markdownContent, "")
+		}
+		if propertyContext.Value != "" {
+			markdownContent = append(markdownContent, fmt.Sprintf("**Value**: `%s`", propertyContext.Value))
+			markdownContent = append(markdownContent, "")
+		}
+		if propertyContext.BoundProperty != "" {
+			markdownContent = append(markdownContent, fmt.Sprintf("**Bound to**: `%s`", propertyContext.BoundProperty))
+			markdownContent = append(markdownContent, "")
+		}
+	}
+	
+	// Common property descriptions
+	propertyDesc := hp.getCommonPropertyDescription(propertyName)
+	if propertyDesc != "" {
+		markdownContent = append(markdownContent, fmt.Sprintf("**Description**: %s", propertyDesc))
 		markdownContent = append(markdownContent, "")
 	}
 	
 	// Usage examples
-	usageExamples := hp.getPropertyUsageExamples(propertyName)
-	if len(usageExamples) > 0 {
+	usageExample := hp.getPropertyUsageExample(propertyName)
+	if usageExample != "" {
 		markdownContent = append(markdownContent, "**Usage**:")
 		markdownContent = append(markdownContent, "```tree")
-		for _, example := range usageExamples {
-			markdownContent = append(markdownContent, example)
-		}
+		markdownContent = append(markdownContent, usageExample)
 		markdownContent = append(markdownContent, "```")
 	}
 	
@@ -254,6 +295,103 @@ func (hp *HoverProvider) getPropertyHover(propertyName, content string) *MarkupC
 func (hp *HoverProvider) getSubPropertyHover(propertyName, content string) *MarkupContent {
 	// For sub-properties, provide similar information as regular properties
 	return hp.getPropertyHover(propertyName, content)
+}
+
+type PropertyContext struct {
+	BindingType    string // "<=", "<=>", "=>", "^", ""
+	Value          string
+	BoundProperty  string
+}
+
+func (hp *HoverProvider) findPropertyContext(propertyName, content string) *PropertyContext {
+	lines := strings.Split(content, "\n")
+	
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		
+		// Look for property definitions
+		if strings.Contains(line, propertyName) {
+			// Check for different binding types
+			if match := regexp.MustCompile(fmt.Sprintf(`%s\s*<=>\s*([^\\s]+)`, regexp.QuoteMeta(propertyName))).FindStringSubmatch(trimmed); len(match) > 1 {
+				return &PropertyContext{
+					BindingType:   "<=>",
+					BoundProperty: match[1],
+				}
+			}
+			if match := regexp.MustCompile(fmt.Sprintf(`%s\s*<=\s*([^\\s]+)`, regexp.QuoteMeta(propertyName))).FindStringSubmatch(trimmed); len(match) > 1 {
+				return &PropertyContext{
+					BindingType:   "<=",
+					BoundProperty: match[1],
+				}
+			}
+			if match := regexp.MustCompile(fmt.Sprintf(`%s\s*=>\s*([^\\s]+)`, regexp.QuoteMeta(propertyName))).FindStringSubmatch(trimmed); len(match) > 1 {
+				return &PropertyContext{
+					BindingType:   "=>",
+					BoundProperty: match[1],
+				}
+			}
+			if match := regexp.MustCompile(fmt.Sprintf(`%s\s*\^\s*([^\\s]+)`, regexp.QuoteMeta(propertyName))).FindStringSubmatch(trimmed); len(match) > 1 {
+				return &PropertyContext{
+					BindingType: "^",
+					Value:       match[1],
+				}
+			}
+			// Check for direct value assignment
+			if match := regexp.MustCompile(fmt.Sprintf(`%s\s+(.+)`, regexp.QuoteMeta(propertyName))).FindStringSubmatch(trimmed); len(match) > 1 {
+				value := strings.TrimSpace(match[1])
+				if !strings.HasPrefix(value, "<=") && !strings.HasPrefix(value, "=>") && !strings.HasPrefix(value, "^") {
+					return &PropertyContext{
+						Value: value,
+					}
+				}
+			}
+		}
+	}
+	
+	return nil
+}
+
+func (hp *HoverProvider) getCommonPropertyDescription(propertyName string) string {
+	commonProps := map[string]string{
+		"title":       "Display text or label for the component",
+		"hint":        "Placeholder or helper text",
+		"value":       "Current value of the component",
+		"enabled":     "Whether the component is enabled/disabled",
+		"visible":     "Whether the component is visible",
+		"click":       "Click event handler",
+		"change":      "Change event handler",
+		"focus":       "Focus event handler",
+		"blur":        "Blur event handler",
+		"sub":         "Sub-components or child elements",
+		"content":     "Content area of the component",
+		"plugins":     "Plugin configurations",
+		"attr":        "HTML attributes",
+		"field":       "Form field configuration",
+		"uri":         "URL or URI reference",
+		"rows":        "List of row items",
+		"dom_name":    "HTML tag name",
+		"dom_name_space": "HTML namespace",
+	}
+	
+	return commonProps[propertyName]
+}
+
+func (hp *HoverProvider) getPropertyUsageExample(propertyName string) string {
+	examples := map[string]string{
+		"title":   fmt.Sprintf("\t%s @ \\Display Text", propertyName),
+		"hint":    fmt.Sprintf("\t%s @ \\Placeholder text", propertyName),
+		"value":   fmt.Sprintf("\t%s? <=> bound_property? \\default", propertyName),
+		"enabled": fmt.Sprintf("\t%s <= is_enabled", propertyName),
+		"click":   fmt.Sprintf("\t%s? <=> on_click? null", propertyName),
+		"sub":     fmt.Sprintf("\t%s /\n\t\t<= Item $component", propertyName),
+		"content": fmt.Sprintf("\t%s /\n\t\t<= Child $component", propertyName),
+	}
+	
+	if example, exists := examples[propertyName]; exists {
+		return example
+	}
+	
+	return fmt.Sprintf("\t%s <= some_value", propertyName)
 }
 
 func (hp *HoverProvider) getGenericHover(nodeName string) *MarkupContent {
