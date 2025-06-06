@@ -174,8 +174,8 @@ func (ps *ProjectScanner) parseViewTreeFile(content, filePath string) {
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		
-		// Take only the first word from lines without indentation
-		if !strings.HasPrefix(line, "\t") && !strings.HasPrefix(line, " ") && strings.HasPrefix(trimmed, "$") {
+		// Take only the first word from lines without indentation (tabs only)
+		if !strings.HasPrefix(line, "\t") && strings.HasPrefix(trimmed, "$") {
 			fields := strings.Fields(trimmed)
 			if len(fields) > 0 {
 				firstWord := fields[0]
@@ -192,24 +192,36 @@ func (ps *ProjectScanner) parseViewTreeFile(content, filePath string) {
 			}
 		}
 		
-		// Look for properties (indented lines without <= and <=>)
+		// Look for properties according to review:
+		// 1. All nodes at first indent level (one tab)
+		// 2. All nodes after bindings => <=> <=
 		if currentComponent != "" {
-			indentMatch := regexp.MustCompile(`^(\s+)([a-zA-Z_][a-zA-Z0-9_?*]*)\s*`).FindStringSubmatch(line)
-			if len(indentMatch) > 2 && len(indentMatch[1]) > 0 && 
-			   !strings.Contains(trimmed, "<=") && !strings.Contains(trimmed, "<=>") {
-				property := indentMatch[2]
-				if property != "" && !strings.HasPrefix(property, "$") && 
-				   property != "null" && property != "true" && property != "false" {
-					ps.projectData.ComponentProperties[currentComponent][property] = true
+			// Check for first level indented properties (one tab only)
+			if strings.HasPrefix(line, "\t") && !strings.HasPrefix(line, "\t\t") {
+				// Extract property name from first level
+				propertyMatch := regexp.MustCompile(`^\t([a-zA-Z_][a-zA-Z0-9_?*]*)`).FindStringSubmatch(line)
+				if len(propertyMatch) > 1 {
+					property := propertyMatch[1]
+					if property != "" && !strings.HasPrefix(property, "$") && 
+					   property != "null" && property != "true" && property != "false" {
+						ps.projectData.ComponentProperties[currentComponent][property] = true
+					}
 				}
 			}
 			
-			// Look for properties in bindings: <= PropertyName
-			bindingMatch := regexp.MustCompile(`<=\s+([a-zA-Z_][a-zA-Z0-9_?*]*)`).FindStringSubmatch(trimmed)
-			if len(bindingMatch) > 1 {
-				property := bindingMatch[1]
-				if property != "" && !strings.HasPrefix(property, "$") {
-					ps.projectData.ComponentProperties[currentComponent][property] = true
+			// Look for properties after bindings: <= => <=> PropertyName
+			bindingMatches := []string{
+				`<=\s+([a-zA-Z_][a-zA-Z0-9_?*]*)`,
+				`=>\s+([a-zA-Z_][a-zA-Z0-9_?*]*)`,
+				`<=>\s+([a-zA-Z_][a-zA-Z0-9_?*]*)`,
+			}
+			
+			for _, pattern := range bindingMatches {
+				if bindingMatch := regexp.MustCompile(pattern).FindStringSubmatch(trimmed); len(bindingMatch) > 1 {
+					property := bindingMatch[1]
+					if property != "" && !strings.HasPrefix(property, "$") {
+						ps.projectData.ComponentProperties[currentComponent][property] = true
+					}
 				}
 			}
 		}

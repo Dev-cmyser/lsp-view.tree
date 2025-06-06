@@ -400,8 +400,11 @@ func (dp *DiagnosticProvider) validateBindings(content string) []Diagnostic {
 			}
 		}
 
-		// Check for conflicting bindings
-		if strings.Contains(trimmed, "<=") && strings.Contains(trimmed, "<=>") {
+		// Check for conflicting bindings - count actual distinct operators
+		hasOneWayBinding := regexp.MustCompile(`[^<]<=\s`).MatchString(trimmed)
+		hasTwoWayBinding := strings.Contains(trimmed, "<=>")
+		
+		if hasOneWayBinding && hasTwoWayBinding {
 			r := Range{
 				Start: Position{Line: lineIndex, Character: 0},
 				End:   Position{Line: lineIndex, Character: len(line)},

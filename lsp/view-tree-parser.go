@@ -258,26 +258,68 @@ func (vtp *ViewTreeParser) GetWordRangeAtPosition(content string, position Posit
 func (vtp *ViewTreeParser) GetCurrentComponent(content string, position Position) string {
 	vtp.lines = strings.Split(content, "\n")
 
-	// Look backwards from current position to find the component
-	for i := position.Line; i >= 0; i-- {
-		if i >= len(vtp.lines) {
-			continue
-		}
+	if position.Line >= len(vtp.lines) {
+		return ""
+	}
+
+	// First, check if current line contains a component reference
+	currentLine := vtp.lines[position.Line]
+	if componentInLine := vtp.extractComponentFromLine(currentLine); componentInLine != "" {
+		return componentInLine
+	}
+
+	// Look backwards to find the closest component that owns this position
+	currentIndent := vtp.getIndentLevel(currentLine)
+	
+	for i := position.Line - 1; i >= 0; i-- {
 		line := vtp.lines[i]
 		if line == "" {
 			continue
 		}
-		trimmed := strings.TrimSpace(line)
-
-		// If line has no indentation and starts with $
-		if !strings.HasPrefix(line, "\t") && !strings.HasPrefix(line, " ") && strings.HasPrefix(trimmed, "$") {
-			fields := strings.Fields(trimmed)
-			if len(fields) > 0 && strings.HasPrefix(fields[0], "$") {
-				return fields[0]
+		
+		lineIndent := vtp.getIndentLevel(line)
+		
+		// If we find a line with less indentation, check if it contains a component
+		if lineIndent < currentIndent {
+			if componentInLine := vtp.extractComponentFromLine(line); componentInLine != "" {
+				return componentInLine
+			}
+		}
+		
+		// If line has no indentation and starts with $, it's a root component
+		if lineIndent == 0 {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "$") {
+				fields := strings.Fields(trimmed)
+				if len(fields) > 0 && strings.HasPrefix(fields[0], "$") {
+					return fields[0]
+				}
 			}
 		}
 	}
 
+	return ""
+}
+
+func (vtp *ViewTreeParser) extractComponentFromLine(line string) string {
+	// Look for component references like "<= Button $mol_button_major"
+	trimmed := strings.TrimSpace(line)
+	
+	// Check for binding patterns with components
+	patterns := []string{
+		`<=\s+\w+\s+(\$\w+)`,
+		`=>\s+\w+\s+(\$\w+)`,
+		`<=>\s+\w+\s+(\$\w+)`,
+		`^\s*(\$\w+)`, // Direct component reference
+	}
+	
+	for _, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		if matches := re.FindStringSubmatch(trimmed); len(matches) > 1 {
+			return matches[1]
+		}
+	}
+	
 	return ""
 }
 
@@ -286,8 +328,6 @@ func (vtp *ViewTreeParser) getIndentLevel(line string) int {
 	for _, char := range line {
 		if char == '\t' {
 			indent++
-		} else if char == ' ' {
-			indent++ // Could be adjusted for different space-to-tab ratios
 		} else {
 			break
 		}
