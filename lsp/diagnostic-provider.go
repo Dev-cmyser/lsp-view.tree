@@ -142,23 +142,7 @@ func (dp *DiagnosticProvider) validateSyntax(content, documentURI string) []Diag
 	return diagnostics
 }
 
-func (dp *DiagnosticProvider) isBuiltInComponent(componentName string) bool {
-	// List of built-in component prefixes that should be ignored
-	builtInPrefixes := []string{
-		"$mol_", // All $mol framework components
-		"$",     // All  components
 
-	}
-
-	// Check prefixes
-	for _, prefix := range builtInPrefixes {
-		if strings.HasPrefix(componentName, prefix) {
-			return true
-		}
-	}
-
-	return false
-}
 
 func (dp *DiagnosticProvider) validateComponents(components []ParsedComponent, documentURI string) []Diagnostic {
 	var diagnostics []Diagnostic
@@ -181,7 +165,7 @@ func (dp *DiagnosticProvider) validateComponents(components []ParsedComponent, d
 		// Also check if component is defined in current document
 		hasComponentInCurrentDoc := currentDocComponents[componentName]
 
-		if !hasComponent && !hasComponentInCurrentDoc && !dp.isBuiltInComponent(componentName) {
+		if !hasComponent && !hasComponentInCurrentDoc {
 			diagnostics = append(diagnostics, Diagnostic{
 				Severity: DiagnosticSeverityWarning,
 				Range:    component.Range,
