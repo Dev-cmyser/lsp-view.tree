@@ -369,6 +369,57 @@ func TestDiagnosticProvider(t *testing.T) {
 	}
 }
 
+func TestComponentValidationWithBuiltIns(t *testing.T) {
+	scanner := NewProjectScanner(".")
+	provider := NewDiagnosticProvider(scanner)
+	
+	document := &TextDocument{
+		URI:        "file:///test.view.tree",
+		LanguageID: "tree",
+		Version:    1,
+		Text: `$my_component $mol_view
+	sub /
+		<= Button $mol_button_major
+			title @ \Click me
+		<= Message $mol_status
+			title @ \Status
+		<= Input $mol_string
+			value? <=> text? \
+
+$another_component $mol_card
+	title @ \Test Card
+	content /
+		<= Link $mol_link
+			uri \#test
+			title \Test Link`,
+	}
+	
+	diagnostics, err := provider.ProvideDiagnostics(document)
+	if err != nil {
+		t.Fatalf("ProvideDiagnostics failed: %v", err)
+	}
+	
+	// Check that built-in components don't generate warnings
+	for _, diag := range diagnostics {
+		if strings.Contains(diag.Message, "not found in project") {
+			// Should only be for non-built-in components
+			if strings.Contains(diag.Message, "$mol_") {
+				t.Errorf("Built-in component incorrectly flagged as not found: %s", diag.Message)
+			}
+		}
+	}
+	
+	// Components defined in the same document should not generate warnings
+	for _, diag := range diagnostics {
+		if strings.Contains(diag.Message, "$my_component") && strings.Contains(diag.Message, "not found") {
+			t.Errorf("Component defined in same document flagged as not found: %s", diag.Message)
+		}
+		if strings.Contains(diag.Message, "$another_component") && strings.Contains(diag.Message, "not found") {
+			t.Errorf("Component defined in same document flagged as not found: %s", diag.Message)
+		}
+	}
+}
+
 func TestLSPMessageParsing(t *testing.T) {
 	// Test valid LSP message
 	msg := LSPMessage{

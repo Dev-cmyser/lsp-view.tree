@@ -142,9 +142,33 @@ func (dp *DiagnosticProvider) validateSyntax(content, documentURI string) []Diag
 	return diagnostics
 }
 
+func (dp *DiagnosticProvider) isBuiltInComponent(componentName string) bool {
+	// List of built-in component prefixes that should be ignored
+	builtInPrefixes := []string{
+		"$mol_", // All $mol framework components
+		"$",     // All  components
+
+	}
+
+	// Check prefixes
+	for _, prefix := range builtInPrefixes {
+		if strings.HasPrefix(componentName, prefix) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (dp *DiagnosticProvider) validateComponents(components []ParsedComponent, documentURI string) []Diagnostic {
 	var diagnostics []Diagnostic
 	projectData := dp.projectScanner.GetProjectData()
+
+	// Create a set of components defined in current document
+	currentDocComponents := make(map[string]bool)
+	for _, comp := range components {
+		currentDocComponents[comp.Name] = true
+	}
 
 	for _, component := range components {
 		componentName := component.Name
@@ -154,8 +178,10 @@ func (dp *DiagnosticProvider) validateComponents(components []ParsedComponent, d
 		hasComponent := projectData.Components[componentName]
 		projectData.mutex.RUnlock()
 
-		if !hasComponent && !strings.HasPrefix(componentName, "$mol_") {
-			// Skip built-in $mol_ components for now
+		// Also check if component is defined in current document
+		hasComponentInCurrentDoc := currentDocComponents[componentName]
+
+		if !hasComponent && !hasComponentInCurrentDoc && !dp.isBuiltInComponent(componentName) {
 			diagnostics = append(diagnostics, Diagnostic{
 				Severity: DiagnosticSeverityWarning,
 				Range:    component.Range,
@@ -405,7 +431,7 @@ func (dp *DiagnosticProvider) validateBindings(content string) []Diagnostic {
 			// Only check for standalone <= if there's no <=> present
 			hasOneWayBinding = regexp.MustCompile(`\s<=\s`).MatchString(trimmed)
 		}
-		
+
 		// Check for multiple different binding operators on same line
 		bindingCount := 0
 		if hasTwoWayBinding {
@@ -417,7 +443,7 @@ func (dp *DiagnosticProvider) validateBindings(content string) []Diagnostic {
 		if regexp.MustCompile(`\s=>\s`).MatchString(trimmed) {
 			bindingCount++
 		}
-		
+
 		if bindingCount > 1 {
 			r := Range{
 				Start: Position{Line: lineIndex, Character: 0},

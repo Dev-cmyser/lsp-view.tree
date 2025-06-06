@@ -992,6 +992,15 @@ func (s *Server) handleDidOpen(msg LSPMessage) error {
 	
 	s.documents.Store(params.TextDocument.URI, doc)
 	
+	// Update project data incrementally
+	if s.projectScanner != nil {
+		uri := params.TextDocument.URI
+		if strings.HasSuffix(uri, ".view.tree") || strings.HasSuffix(uri, ".ts") {
+			filePath := s.uriToFilePath(uri)
+			s.projectScanner.UpdateSingleFile(filePath, doc.Text)
+		}
+	}
+	
 	// Validate document
 	s.validateTextDocument(doc)
 	
