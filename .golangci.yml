@@ -1,0 +1,268 @@
+version: "2"
+run:
+  modules-download-mode: readonly
+  tests: false
+  allow-parallel-runners: true
+  allow-serial-runners: true
+linters:
+  default: none
+  enable:
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - contextcheck
+    - copyloopvar
+    - cyclop
+    - dupl
+    - durationcheck
+    - errcheck
+    - errorlint
+    - forbidigo
+    - gocognit
+    - goconst
+    - gocritic
+    - gocyclo
+    - gosec
+    - govet
+    - ineffassign
+    - makezero
+    - mnd
+    - nakedret
+    - nestif
+    - noctx
+    - nolintlint
+    - promlinter
+    - rowserrcheck
+    - sqlclosecheck
+    - staticcheck
+    - tparallel
+    - unconvert
+    - unused
+    - wastedassign
+    - whitespace
+  settings:
+    cyclop:
+      max-complexity: 110
+      package-average: 50
+    depguard:
+      rules:
+        log:
+          files:
+            - $all
+            - '!$test'
+          deny:
+            - pkg: log$
+              desc: Use pkg/log instead
+    dupl:
+      threshold: 150
+    errcheck:
+      check-type-assertions: false
+      check-blank: false
+      disable-default-exclusions: false
+      exclude-functions:
+        - (*github.com/go-playground/validator/v10.Validate).RegisterValidation
+        - (github.com/go-playground/validator/v10.FieldLevel).Field().Interface
+        - (github.com/go-playground/validator/v10.FieldLevel).Parent().Interface
+        - (github.com/go-playground/validator/v10.FieldLevel).Parent().FieldByName
+        - (github.com/go-playground/validator/v10.FieldLevel).Top().Interface
+    errorlint:
+      errorf: false
+      asserts: true
+      comparison: true
+    exhaustive:
+      default-signifies-exhaustive: false
+    forbidigo:
+      forbid:
+        - pattern: ^print(ln)?$(# Do not use print statements)?
+        - pattern: fmt\.Print.*(# Do not use print statements)?
+        - pattern: sql\.DB\.Exec$(# Use ExecContext instead)?
+        - pattern: sql\.DB\.Query$(# Use QueryContext instead)?
+        - pattern: sql\.DB\.QueryRow$(# Use QueryRowContext instead)?
+      analyze-types: true
+    gocognit:
+      min-complexity: 182
+    goconst:
+      match-constant: true
+      min-len: 3
+      min-occurrences: 3
+      numbers: true
+      min: 3
+      max: 3
+      ignore-calls: true
+    gocritic:
+      disabled-checks:
+        - assignOp
+      settings:
+        captLocal:
+          paramsOnly: false
+        elseif:
+          skipBalanced: false
+        underef:
+          skipRecvDeref: false
+    gocyclo:
+      min-complexity: 100
+    gosec:
+      excludes:
+        - G401
+        - G501
+        - G115
+    govet:
+      disable:
+        - fieldalignment
+      enable-all: true
+      settings:
+        shadow:
+          strict: true
+    makezero:
+      always: false
+    nakedret:
+      max-func-lines: 0
+    nestif:
+      min-complexity: 15
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-no-explanation:
+        - funlen
+        - gocognit
+        - lll
+      allow-unused: false
+    promlinter:
+      strict: false
+    rowserrcheck:
+      packages:
+        - database/sql
+        - github.com/jmoiron/sqlx
+    staticcheck:
+      checks:
+        - all
+        - -ST1003
+      initialisms:
+        - ACL
+        - API
+        - ASCII
+        - CPU
+        - CSS
+        - DNS
+        - EOF
+        - GUID
+        - HTML
+        - HTTP
+        - HTTPS
+        - ID
+        - IP
+        - JSON
+        - QPS
+        - RAM
+        - RPC
+        - SLA
+        - SMTP
+        - SQL
+        - SSH
+        - TCP
+        - TLS
+        - TTL
+        - UDP
+        - UI
+        - GID
+        - UID
+        - UUID
+        - URI
+        - URL
+        - UTF8
+        - VM
+        - XML
+        - XMPP
+        - XSRF
+        - XSS
+      http-status-code-whitelist:
+        - "200"
+        - "400"
+        - "404"
+        - "500"
+    unparam:
+      check-exported: false
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - lll
+        source: ^//\s*go:generate\s
+      - linters:
+          - lll
+        source: ([a-zA-Z0-9_]+:"[^"]*")
+      - linters:
+          - gocritic
+        source: //noinspection
+      - linters:
+          - errorlint
+        source: ^\s+if _, ok := err\.\([^.]+\.InternalError\); ok {
+      - linters:
+          - dupl
+          - funlen
+          - gosec
+          - lll
+          - mnd
+          - nolintlint
+          - wrapcheck
+        path: _test\.go
+      - linters:
+          - staticcheck
+        path: internal/gateway/...
+      - linters:
+          - govet
+        text: 'shadow: declaration of "(err|ok)" shadows declaration at'
+      - linters:
+          - errcheck
+        text: Error return value of `tx.Rollback` is not checked
+      - linters:
+          - staticcheck
+        text: "ST1005"
+        source: "ErrorMessage"
+    paths:
+      - _mock\.go
+      - _gen\.go
+      - mock
+      - mocks
+      - third_party$
+      - builtin$
+      - examples$
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+severity:
+  default: error
+  rules:
+    - linters:
+        - bidichk
+        - contextcheck
+        - cyclop
+        - govet
+        - mnd
+        - promlinter
+      severity: warning
+    - linters:
+        - forbidigo
+      text: Use ExecContext instead
+      severity: warning
+    - linters:
+        - forbidigo
+      text: Use QueryContext instead
+      severity: warning
+    - linters:
+        - forbidigo
+      text: Use QueryRowContext instead
+      severity: warning
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+      - internal/gateway/...

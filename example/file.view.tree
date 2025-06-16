@@ -1,0 +1,21 @@
+$hyoo_mol_example_app $mol_page
+	dictionary *
+		^
+		units /
+			null
+			false
+			true
+		numbs /number
+			+5
+			+Infinity
+			-Infinity
+			NaN
+		text \
+			\hello
+			\word
+	body /$mol_view
+		<= Selector $hyoo_mol_example_selector
+			empty @ \Multilingual string
+			value? <=> selector_value? \bidi bind
+			options <= dictionary
+			focused => selector_focused
