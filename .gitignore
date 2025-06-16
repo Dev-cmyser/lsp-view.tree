@@ -128,5 +128,13 @@ docs/build/
 
 # Backup files
 *.bak
-*.backup# Keep built files for distribution
+*.backup
+
+# Release artifacts
+*.tar.gz
+lsp-go-binary/
+lsp-view-tree.tar.gz
+lsp-go-binary.tar.gz
+
+# Keep built files for distribution
 !lib/
